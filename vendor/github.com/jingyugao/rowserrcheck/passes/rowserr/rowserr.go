@@ -31,12 +31,11 @@ const (
 )
 
 type runner struct {
-	pass      *analysis.Pass
-	rowsTyp   *types.Pointer
-	rowsObj   types.Object
-	closeMthd *types.Func
-	skipFile  map[*ast.File]bool
-	sqlPkgs   []string
+	pass     *analysis.Pass
+	rowsTyp  *types.Pointer
+	rowsObj  types.Object
+	skipFile map[*ast.File]bool
+	sqlPkgs  []string
 }
 
 func NewRun(pkgs ...string) func(pass *analysis.Pass) (interface{}, error) {
@@ -55,15 +54,13 @@ func NewRun(pkgs ...string) func(pass *analysis.Pass) (interface{}, error) {
 // by value because this func is called in parallel for different passes.
 func (r runner) run(pass *analysis.Pass, pkgPath string) (interface{}, error) {
 	r.pass = pass
-	ssa := pass.ResultOf[buildssa.Analyzer].(*buildssa.SSA)
-	funcs := ssa.SrcFuncs
-	pkg := ssa.Pkg.Prog.ImportedPackage(pkgPath)
+	funcs := pass.ResultOf[buildssa.Analyzer].(*buildssa.SSA).SrcFuncs
+	pkg := pass.ResultOf[buildssa.Analyzer].(*buildssa.SSA).Pkg.Prog.ImportedPackage(pkgPath)
 	if pkg == nil {
 		return nil, nil
 	}
 
 	r.rowsObj = pkg.Type(rowsName).Object()
-	// r.rowsObj = analysisutil.LookupFromImports(pass.Pkg.Imports(), pkgPath, rowsName)
 	pmtPkgs := ""
 	for _, p := range pass.Pkg.Imports() {
 		pmtPkgs += "," + p.String()
@@ -73,19 +70,11 @@ func (r runner) run(pass *analysis.Pass, pkgPath string) (interface{}, error) {
 		return nil, nil
 	}
 
-	resNamed, ok := r.rowsObj.Type().(*types.Named)
+	rowsNamed, ok := r.rowsObj.Type().(*types.Named)
 	if !ok {
 		return nil, nil
 	}
-	r.rowsTyp = types.NewPointer(resNamed)
-
-	rowsNamed := r.rowsObj.Type().(*types.Named)
-	for i := 0; i < rowsNamed.NumMethods(); i++ {
-		rsmd := rowsNamed.Method(i)
-		if rsmd.Id() == errMethod {
-			r.closeMthd = rsmd
-		}
-	}
+	r.rowsTyp = types.NewPointer(rowsNamed)
 
 	r.skipFile = map[*ast.File]bool{}
 	for _, f := range funcs {
@@ -242,11 +231,11 @@ func (r *runner) getBodyOp(instr ssa.Instruction) (*ssa.UnOp, bool) {
 func (r *runner) isCloseCall(ccall ssa.Instruction) bool {
 	switch ccall := ccall.(type) {
 	case *ssa.Defer:
-		if ccall.Call.Value != nil && ccall.Call.Value.Name() == r.closeMthd.Name() {
+		if ccall.Call.Value != nil && ccall.Call.Value.Name() == errMethod {
 			return true
 		}
 	case *ssa.Call:
-		if ccall.Call.Value != nil && ccall.Call.Value.Name() == r.closeMthd.Name() {
+		if ccall.Call.Value != nil && ccall.Call.Value.Name() == errMethod {
 			return true
 		}
 
